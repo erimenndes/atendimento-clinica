@@ -1,0 +1,797 @@
+{
+  "name": "Secretaria IA Reabilis - Atendimento WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "id": "4af7794e-311d-41d4-a504-2eec8de58b02",
+      "name": "Mensagem Recebida (WhatsApp)",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        304,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "telefone",
+              "name": "telefone",
+              "value": "={{ $json.messages[0].from }}",
+              "type": "string"
+            },
+            {
+              "id": "mensagem",
+              "name": "mensagem",
+              "value": "={{ $json.messages[0].text.body }}",
+              "type": "string"
+            },
+            {
+              "id": "nome_contato",
+              "name": "nome_contato",
+              "value": "={{ $json.contacts[0].profile.name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "9d086af2-f988-4289-9e3d-1ec278db9bd1",
+      "name": "Normalizar Mensagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        560,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.mensagem }}",
+        "options": {
+          "systemMessage": "Voce e a secretaria virtual da Clinica Reabilis, uma clinica de psicologia. Atenda pacientes e terapeutas pelo WhatsApp com acolhimento, profissionalismo e objetividade.\n\nFluxo obrigatorio no INICIO de qualquer atendimento:\n1. Use \"Buscar Terapeuta por Telefone\" para verificar se quem esta escrevendo e um terapeuta cadastrado.\n2. Se for um terapeuta (registro encontrado), siga o FLUXO PARA TERAPEUTAS abaixo.\n3. Se nao for um terapeuta, siga o FLUXO PARA PACIENTES abaixo (comportamento padrao).\n\n=== FLUXO PARA PACIENTES ===\n1. Use \"Buscar Paciente por Telefone\" para verificar se o paciente ja tem cadastro.\n2. Se encontrado, use o \"id\" retornado como paciente_id e o \"terapeuta_id\" ja associado a ele para as demais ferramentas.\n3. Se NAO encontrado, pergunte o nome completo do paciente. Se houver mais de um terapeuta ativo (use \"Buscar Terapeutas Ativos\" para checar), pergunte com qual terapeuta o paciente deseja se consultar. Em seguida use \"Criar Paciente\" para cadastra-lo e obtenha o paciente_id retornado.\n4. Para saber o calendario e o telefone corretos do terapeuta (ao verificar disponibilidade, criar/reagendar/cancelar eventos, ou notifica-lo de uma nova consulta), use \"Buscar Terapeutas Ativos\" e pegue os campos google_calendar_id e telefone do terapeuta correspondente ao terapeuta_id do paciente.\n\nResponsabilidades no fluxo de pacientes:\n1. Marcar novas consultas, sempre verificando disponibilidade na agenda do terapeuta correto antes de reservar.\n   - IMPORTANTE: toda nova consulta marcada fica com status \"pendente\" ate o terapeuta aprovar. Ao criar o evento na agenda (Criar Consulta na Agenda), inclua \"(aguardando aprovacao)\" no titulo.\n   - Depois de registrar a consulta no Supabase como \"pendente\", SEMPRE use \"Enviar Mensagem para Numero\" para avisar o terapeuta responsavel (telefone obtido via Buscar Terapeutas Ativos), informando nome do paciente, data/hora, e pedindo para responder aprovando ou recusando.\n   - Avise o paciente que o horario foi reservado mas ainda depende da confirmacao do terapeuta, e que ele sera avisado assim que houver uma resposta. Nunca diga que a consulta esta \"confirmada\" nesse momento.\n2. Reagendar consultas existentes (Reagendar Consulta na Agenda + Atualizar Agendamento no Supabase). Reagendamento tambem exige nova aprovacao do terapeuta: registre o novo horario com status \"pendente\" novamente e notifique o terapeuta como no passo anterior.\n3. Cancelar consultas quando solicitado (Cancelar Consulta na Agenda + Atualizar Agendamento no Supabase, novo_status: cancelado).\n4. Confirmar a presenca do paciente quando ele responder a um lembrete de consulta (ex: \"sim\", \"confirmo\", \"estarei la\") em uma consulta que ja esteja \"agendado\" (ja aprovada pelo terapeuta), atualizando o status para \"confirmado\". Se o paciente avisar que nao podera comparecer, trate como pedido de cancelamento ou reagendamento.\n5. Responder duvidas gerais sobre a clinica (horario de funcionamento, endereco, valores, convenios) usando as informacoes abaixo. Se nao souber a resposta, oriente o paciente a aguardar contato da secretaria humana e nunca invente informacoes.\n\n=== FLUXO PARA TERAPEUTAS ===\nQuando quem escreve e um terapeuta cadastrado (encontrado via Buscar Terapeuta por Telefone), use o \"id\" retornado como terapeuta_id.\n\n1. Se o terapeuta perguntar sobre consultas pendentes, ou se a mensagem dele parecer uma resposta de aprovacao/recusa sem deixar claro a qual consulta se refere (ex: apenas \"aprovado\", \"pode confirmar\", \"recusar\"), use \"Buscar Consultas Pendentes do Terapeuta\" com o terapeuta_id para listar as pendencias.\n   - Se so houver uma consulta pendente, assuma que a resposta se refere a ela.\n   - Se houver mais de uma, use \"Buscar Paciente por ID\" para descobrir o nome de cada paciente e liste as opcoes (nome + data/hora) para o terapeuta escolher antes de agir.\n2. Para APROVAR uma consulta: use \"Atualizar Agendamento no Supabase\" (novo_status: agendado) no google_event_id correspondente. Em seguida use \"Buscar Paciente por ID\" para obter o telefone do paciente e \"Enviar Mensagem para Numero\" para avisa-lo que a consulta foi confirmada.\n3. Para RECUSAR uma consulta: use \"Atualizar Agendamento no Supabase\" (novo_status: recusado) e \"Cancelar Consulta na Agenda\" para liberar o horario. Em seguida avise o paciente via \"Enviar Mensagem para Numero\" que o horario nao pode ser confirmado, pedindo para escolher outro horario.\n4. Seja breve e direta com o terapeuta. Confirme a acao tomada ao final (ex: \"Consulta de Joana as 14h de amanha aprovada e paciente avisado.\").\n\nInformacoes da clinica (PREENCHER):\n- Horario de funcionamento: [preencher]\n- Endereco: [preencher]\n- Valores da consulta: [preencher]\n- Convenios aceitos: [preencher]\n\nFerramentas disponiveis e quando usar:\n- Buscar Terapeuta por Telefone: use SEMPRE no inicio da conversa para saber se quem escreve e terapeuta.\n- Buscar Paciente por Telefone: use no inicio do fluxo de paciente (quando quem escreve nao e terapeuta).\n- Criar Paciente: use quando o paciente nao tiver cadastro, apos coletar nome (e terapeuta, se houver mais de um ativo).\n- Buscar Terapeutas Ativos: use para descobrir terapeutas, seus calendarios (google_calendar_id) e telefones.\n- Verificar Disponibilidade na Agenda: use sempre antes de reservar um novo horario, informando o calendar_id do terapeuta correto.\n- Criar Consulta na Agenda: use apos o paciente confirmar dia e horario (evento fica marcado como pendente ate aprovacao).\n- Registrar Agendamento no Supabase: use logo apos criar a consulta na agenda; toda nova consulta entra com status \"pendente\".\n- Buscar Agendamentos do Paciente no Supabase: use com o paciente_id para localizar as sessoes do paciente antes de reagendar, cancelar ou confirmar presenca.\n- Reagendar Consulta na Agenda e Atualizar Agendamento no Supabase: use as duas juntas quando o paciente pedir para mudar o dia ou horario (volta para status pendente).\n- Cancelar Consulta na Agenda e Atualizar Agendamento no Supabase: use as duas juntas quando o paciente pedir para cancelar.\n- Atualizar Agendamento no Supabase (sozinho): use quando o paciente apenas confirmar presenca (novo_status: confirmado), ou quando o terapeuta aprovar/recusar uma consulta (novo_status: agendado ou recusado).\n- Buscar Consultas Pendentes do Terapeuta: use no fluxo do terapeuta para listar o que esta aguardando aprovacao dele.\n- Buscar Paciente por ID: use para descobrir nome e telefone de um paciente a partir do paciente_id (fluxo do terapeuta).\n- Enviar Mensagem para Numero: use para notificar o terapeuta (nova consulta pendente) ou o paciente (consulta aprovada/recusada) -- sempre que o destinatario for diferente de quem enviou a mensagem atual.\n\nRegras importantes:\n- Sempre confirme nome completo e horario antes de marcar qualquer consulta.\n- Nunca marque dois pacientes no mesmo horario.\n- Nunca diga a um paciente que a consulta esta confirmada antes do terapeuta aprovar.\n- Se o paciente demonstrar sinais de crise ou urgencia, oriente a buscar ajuda imediata (CVV 188 ou emergencia 192) e avise que a psicologa sera notificada, sem tentar fazer atendimento clinico.\n- Seja breve, gentil e direta nas respostas.",
+          "maxIterations": 15
+        }
+      },
+      "id": "22ead46b-8a1f-46af-a512-6e314dd6a7af",
+      "name": "Agente Secretaria IA",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        848,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "7a9c15af-adae-4f81-a526-cafa18b5a1f1",
+      "name": "Modelo OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        608,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Mensagem Recebida (WhatsApp)').item.json.messages[\"0\"].from }}",
+        "contextWindowLength": 15
+      },
+      "id": "b44b8e58-3ab3-4a76-a039-b80f348874b5",
+      "name": "Memoria da Conversa",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        736,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "calendar",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('calendar_id', 'ID do Google Calendar do terapeuta (google_calendar_id), obtido via Buscar Terapeutas Ativos') }}"
+        },
+        "timeMin": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_inicio', 'Inicio do intervalo a verificar, formato ISO 8601') }}",
+        "timeMax": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_fim', 'Fim do intervalo a verificar, formato ISO 8601') }}",
+        "options": {}
+      },
+      "id": "92bdd21b-4f0e-48f3-b83b-7633b44bc3ca",
+      "name": "Verificar Disponibilidade na Agenda",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        880,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('calendar_id', 'ID do Google Calendar do terapeuta (google_calendar_id), obtido via Buscar Terapeutas Ativos') }}"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('inicio', 'Data/hora de inicio da consulta, formato ISO 8601') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('fim', 'Data/hora de termino da consulta, formato ISO 8601') }}",
+        "additionalFields": {
+          "description": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('descricao', 'Detalhes adicionais da consulta') }}",
+          "summary": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('titulo', 'Titulo da consulta, ex: Consulta - Nome do Paciente') }}"
+        }
+      },
+      "id": "024e3656-e1c8-4cdd-84c2-ab979906c0ff",
+      "name": "Criar Consulta na Agenda",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('calendar_id', 'ID do Google Calendar do terapeuta (google_calendar_id), obtido via Buscar Terapeutas Ativos') }}"
+        },
+        "eventId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('id_evento', 'ID do evento no Google Calendar a ser reagendado (google_event_id salvo no Supabase)') }}",
+        "updateFields": {
+          "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('novo_fim', 'Nova data/hora de termino, formato ISO 8601') }}",
+          "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('novo_inicio', 'Nova data/hora de inicio, formato ISO 8601') }}"
+        }
+      },
+      "id": "8d270ddd-fd1f-4330-abfe-5779d4bf0852",
+      "name": "Reagendar Consulta na Agenda",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1248,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('calendar_id', 'ID do Google Calendar do terapeuta (google_calendar_id), obtido via Buscar Terapeutas Ativos') }}"
+        },
+        "eventId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('id_evento', 'ID do evento no Google Calendar a ser cancelado (google_event_id salvo no Supabase)') }}",
+        "options": {}
+      },
+      "id": "fe8f7e6a-1a02-4be3-86fa-8c34016f7868",
+      "name": "Cancelar Consulta na Agenda",
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1392,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "paciente_id",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('paciente_id', 'ID do paciente, obtido via Buscar Paciente por Telefone ou Criar Paciente') }}"
+            },
+            {
+              "fieldId": "terapeuta_id",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('terapeuta_id', 'ID do terapeuta responsavel pela consulta') }}"
+            },
+            {
+              "fieldId": "data_hora",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('data_hora', 'Data e hora da consulta, formato ISO 8601') }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "pendente"
+            },
+            {
+              "fieldId": "google_event_id",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('google_event_id', 'ID do evento criado no Google Calendar') }}"
+            }
+          ]
+        },
+        "operation": "create",
+        "tableId": "sessoes"
+      },
+      "id": "020cc07f-da96-412a-9e71-235ccc2166fe",
+      "name": "Registrar Agendamento no Supabase",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        912,
+        736
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "paciente_id",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('paciente_id', 'ID do paciente, obtido via Buscar Paciente por Telefone, para localizar suas sessoes') }}"
+            }
+          ]
+        },
+        "limit": 10,
+        "matchType": "allFilters",
+        "operation": "getAll",
+        "tableId": "sessoes"
+      },
+      "id": "bada14a4-20a6-4444-a8e4-442c16028e74",
+      "name": "Buscar Agendamentos do Paciente no Supabase",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        736
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "sessoes",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "google_event_id",
+              "condition": "eq",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('google_event_id', 'ID do evento do Google Calendar do agendamento a atualizar') }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('novo_status', 'Novo status do agendamento: pendente (aguardando aprovacao do terapeuta), agendado (terapeuta aprovou), confirmado (paciente confirmou presenca), cancelado, reagendado ou recusado (terapeuta recusou)') }}"
+            },
+            {
+              "fieldId": "data_hora",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nova_data_hora', 'Nova data/hora, se o agendamento foi reagendado (deixe vazio se nao mudou)') }}"
+            }
+          ]
+        }
+      },
+      "id": "1ed46d53-dd96-449d-8df5-29cff1c15c34",
+      "name": "Atualizar Agendamento no Supabase",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        688
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "<__PLACEHOLDER_VALUE__ID do numero de telefone comercial do WhatsApp (Meta)__>",
+        "recipientPhoneNumber": "={{ $('Normalizar Mensagem').item.json.telefone }}",
+        "textBody": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "id": "17eb6676-5437-4995-a62a-9b1954529369",
+      "name": "Enviar Resposta ao Paciente",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        1312,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Antes de ativar este fluxo\n\n1. Conecte a conta do WhatsApp Business Cloud (Meta) nos nos marcados.\n2. Conecte a credencial do Google Calendar nos nos do Google Calendar (o calendario agora e escolhido dinamicamente por terapeuta, via google_calendar_id -- nao ha mais um ID fixo).\n3. Conecte a credencial da OpenAI (ou troque pelo modelo de IA de sua preferencia).\n4. [FEITO] Tabelas/colunas do Supabase ajustadas para o schema real: pacientes, terapeutas e sessoes, ligadas por paciente_id/terapeuta_id.\n5. Preencha as informacoes da clinica (horario, endereco, valores) no System Message do Agente.\n6. [NOVO] Toda consulta nova agora fica \"pendente\" ate o terapeuta aprovar pelo WhatsApp -- o numero do terapeuta precisa estar cadastrado na tabela terapeutas para o agente reconhecer quem esta escrevendo. Teste esse fluxo (marcar como paciente, depois responder como terapeuta) antes de liberar para uso real.",
+        "height": 344,
+        "width": 600,
+        "color": 5
+      },
+      "id": "5d05b9f0-d759-46c1-b814-458c4fd5a8c1",
+      "name": "Sticky Note ab0837fc",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        80,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Supabase\n\nTabelas reais em uso:\n- pacientes: id, nome, telefone, data_nascimento, terapeuta_id, status, observacoes, created_at\n- terapeutas: id, nome, telefone, google_calendar_id, ativo, created_at\n- sessoes: id, paciente_id, terapeuta_id, data_hora, status, valor, google_event_id, observacoes, created_at\n\nStatus da coluna \"status\" em sessoes: pendente (aguardando aprovacao do terapeuta), agendado (terapeuta aprovou), confirmado (paciente confirmou presenca), cancelado, reagendado, recusado (terapeuta recusou).",
+        "height": 200,
+        "width": 620,
+        "color": 4
+      },
+      "id": "35eb9778-a37d-4031-9a2a-2699b43089f0",
+      "name": "Sticky Note 53826f87",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        752,
+        -16
+      ]
+    },
+    {
+      "id": "9625ede3-b99a-4588-a6af-15e3616608fa",
+      "name": "Buscar Paciente por Telefone",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        560,
+        900
+      ],
+      "parameters": {
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "telefone",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('telefone', 'Telefone do paciente com DDI e DDD, para localizar o cadastro') }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allFilters",
+        "operation": "getAll",
+        "tableId": "pacientes"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "id": "765a6db7-f467-4f7c-9d10-fb76f64692a7",
+      "name": "Criar Paciente",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        720,
+        900
+      ],
+      "parameters": {
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "nome",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('nome', 'Nome completo do paciente') }}"
+            },
+            {
+              "fieldId": "telefone",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('telefone', 'Telefone do paciente com DDI e DDD') }}"
+            },
+            {
+              "fieldId": "terapeuta_id",
+              "fieldValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('terapeuta_id', 'ID do terapeuta escolhido pelo paciente, obtido via Buscar Terapeutas Ativos') }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "ativo"
+            }
+          ]
+        },
+        "operation": "create",
+        "tableId": "pacientes"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "id": "5604111b-d814-4733-9dc1-a014a5054a29",
+      "name": "Buscar Terapeutas Ativos",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        880,
+        900
+      ],
+      "parameters": {
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "ativo",
+              "keyValue": "true"
+            }
+          ]
+        },
+        "matchType": "allFilters",
+        "operation": "getAll",
+        "returnAll": true,
+        "tableId": "terapeutas"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "id": "aef125e9-54bf-4616-b7e1-d129a5962083",
+      "name": "Buscar Terapeuta por Telefone",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        560,
+        1060
+      ],
+      "parameters": {
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "telefone",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('telefone', 'Telefone de quem esta escrevendo, para verificar se e um terapeuta cadastrado') }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allFilters",
+        "operation": "getAll",
+        "tableId": "terapeutas"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "id": "24f289b1-defb-41bc-88ff-eaec39851915",
+      "name": "Buscar Consultas Pendentes do Terapeuta",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        720,
+        1060
+      ],
+      "parameters": {
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "terapeuta_id",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('terapeuta_id', 'ID do terapeuta, obtido via Buscar Terapeuta por Telefone') }}"
+            },
+            {
+              "condition": "eq",
+              "keyName": "status",
+              "keyValue": "pendente"
+            }
+          ]
+        },
+        "matchType": "allFilters",
+        "operation": "getAll",
+        "returnAll": true,
+        "tableId": "sessoes"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "id": "baffdef9-df42-42cc-bdf1-734346b46749",
+      "name": "Buscar Paciente por ID",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [
+        880,
+        1060
+      ],
+      "parameters": {
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "id",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('paciente_id', 'ID do paciente, para obter nome e telefone dele') }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allFilters",
+        "operation": "getAll",
+        "tableId": "pacientes"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "id": "0183bee8-3602-4877-9c39-d1a24ed11a7d",
+      "name": "Enviar Mensagem para Numero",
+      "type": "n8n-nodes-base.whatsAppTool",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        1060
+      ],
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "<__PLACEHOLDER_VALUE__ID do numero de telefone comercial do WhatsApp (Meta)__>",
+        "recipientPhoneNumber": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('telefone_destino', 'Telefone do destinatario (paciente ou terapeuta), com DDI e DDD') }}",
+        "resource": "message",
+        "textBody": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('mensagem', 'Texto da mensagem a enviar') }}"
+      }
+    }
+  ],
+  "connections": {
+    "Mensagem Recebida (WhatsApp)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente Secretaria IA": {
+      "main": [
+        [
+          {
+            "node": "Enviar Resposta ao Paciente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modelo OpenAI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memoria da Conversa": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar Disponibilidade na Agenda": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Consulta na Agenda": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reagendar Consulta na Agenda": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelar Consulta na Agenda": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Agendamento no Supabase": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Agendamentos do Paciente no Supabase": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar Agendamento no Supabase": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Paciente por Telefone": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Paciente": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Terapeutas Ativos": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Terapeuta por Telefone": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Consultas Pendentes do Terapeuta": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Paciente por ID": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Mensagem para Numero": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente Secretaria IA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0
+}

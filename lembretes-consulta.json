@@ -1,0 +1,228 @@
+{
+  "name": "Secretaria IA Reabilis - Lembretes de Consulta",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "ddcbde69-d423-42dd-9167-1f9a6fc17735",
+      "name": "Todo Dia as 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "<__PLACEHOLDER_VALUE__Nome da tabela de agendamentos no Supabase (ex: appointments)__>",
+        "returnAll": true,
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "data_hora",
+              "condition": "gte",
+              "keyValue": "={{ $today.plus(1, \"days\").toISO() }}"
+            },
+            {
+              "keyName": "data_hora",
+              "condition": "lt",
+              "keyValue": "={{ $today.plus(2, \"days\").toISO() }}"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "agendado"
+            }
+          ]
+        }
+      },
+      "id": "6b533660-1d28-46b3-aa09-0213475932da",
+      "name": "Buscar Consultas de Amanha",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        464,
+        304
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "phoneNumberId": "<__PLACEHOLDER_VALUE__ID do numero de telefone comercial do WhatsApp (Meta)__>",
+        "recipientPhoneNumber": "={{ $json.telefone }}",
+        "template": "<__PLACEHOLDER_VALUE__Nome do template aprovado na Meta para lembrete de consulta__>",
+        "components": {
+          "component": [
+            {
+              "bodyParameters": {
+                "parameter": [
+                  {
+                    "text": "={{ $json.nome_paciente }}"
+                  },
+                  {
+                    "text": "={{ $json.data_hora }}"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "973e4faa-ff84-4ce8-8b72-037c6278fd0c",
+      "name": "Enviar Lembrete WhatsApp",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "<__PLACEHOLDER_VALUE__Nome da tabela de agendamentos no Supabase (ex: appointments)__>",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "google_event_id",
+              "condition": "eq",
+              "keyValue": "={{ $(\"Buscar Consultas de Amanha\").item.json.google_event_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "lembrete_enviado",
+              "fieldValue": "true"
+            }
+          ]
+        }
+      },
+      "id": "f4813fc6-0d60-440e-b0e6-c3f710259523",
+      "name": "Marcar Lembrete Enviado",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        944,
+        384
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "<CREDENTIAL_ID>",
+          "name": "<supabaseApi - configure no seu n8n>"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "737b5d76-8614-4c94-943f-1bc82f87c954",
+      "name": "Processar Lembretes",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        704,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Antes de ativar este fluxo\n\n1. Conecte a conta do WhatsApp Business Cloud (Meta) no no de envio.\n2. Crie e aprove na Meta um template de mensagem para lembrete de consulta (envio fora da janela de 24h exige template aprovado). Coloque o nome exato no campo \"template\".\n3. Ajuste o nome da tabela e das colunas do Supabase para bater com o schema real (data_hora, status, telefone, nome_paciente, google_event_id, lembrete_enviado).\n4. Ajuste o horario de disparo do gatilho se quiser lembrar com mais ou menos antecedencia.\n5. No texto do template aprovado na Meta, peca explicitamente que o paciente responda confirmando a presenca (ex: \"Responda SIM para confirmar\"). Nao ha um agente separado para processar essa resposta: a resposta do paciente cai como mensagem normal no fluxo \"Secretaria IA Reabilis - Atendimento WhatsApp\", que ja reconhece a confirmacao e atualiza o status no Supabase.",
+        "height": 200,
+        "width": 520,
+        "color": 5
+      },
+      "id": "592be93f-dd56-4d5c-bce6-058017fdc814",
+      "name": "Sticky Note 408ce844",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        80
+      ]
+    }
+  ],
+  "connections": {
+    "Todo Dia as 8h": {
+      "main": [
+        [
+          {
+            "node": "Buscar Consultas de Amanha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Consultas de Amanha": {
+      "main": [
+        [
+          {
+            "node": "Processar Lembretes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Lembrete WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Marcar Lembrete Enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Lembrete Enviado": {
+      "main": [
+        [
+          {
+            "node": "Processar Lembretes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Lembretes": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Enviar Lembrete WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0
+}
